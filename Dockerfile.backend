@@ -1,0 +1,11 @@
+# Railway backend only. Configure RAILWAY_DOCKERFILE_PATH=Dockerfile.backend.
+FROM python:3.13-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt && useradd --uid 10001 --create-home campus && mkdir -p /app/data && chown campus:campus /app/data
+COPY --chown=campus:campus backend/ ./backend/
+USER campus
+EXPOSE 8000
+# Railway sets PORT; exec keeps shutdown signals working correctly.
+CMD ["sh", "-c", "exec uvicorn backend.app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
