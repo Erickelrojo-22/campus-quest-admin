@@ -37,3 +37,46 @@ def verify_password(password: str, encoded: str) -> bool:
 
 def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def request_token(request: Request) -> str | None:
+    authorization = request.headers.get("authorization")
+    if authorization:
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(401, "Sesión inválida.", headers={"WWW-Authenticate": "Bearer"})
+        return token.strip()
+    return request.cookies.get(COOKIE_NAME)
+
+
+@dataclass
+class AuthContext:
+    usuario: Usuario
+    token_hash: str
+
+
+def current_auth(request: Request) -> AuthContext:
+    token = request_token(request)
+    if not token:
+        raise HTTPException(401, "Inicia sesión para continuar.", headers={"WWW-Authenticate": "Bearer"})
+    hashed = token_hash(token)
+    with request.app.state.database.sessions() as db:
+        session = db.scalar(select(Sesion).where(Sesion.tokenHash == hashed, Sesion.expiraEn > now_ms()))
+        user = db.get(Usuario, session.usuarioId) if session else None
+        if user is None:
+            raise HTTPException(401, "La sesión expiró o fue revocada.", headers={"WWW-Authenticate": "Bearer"})
+        return AuthContext(user, hashed)
+
+
+def require_admin(request: Request) -> AuthContext:
+    auth = current_auth(request)
+    if auth.usuario.rol != "admin":
+        raise HTTPException(403, "Esta operación requiere una cuenta administradora.")
+    return auth
+
+
+def require_owner(auth: AuthContext, usuario_id: int):
+    if auth.usuario.rol == "admin":
+        return
+    if auth.usuario.rol not in {"estudiante", "visitante"} or auth.usuario.id != usuario_id:
+        raise HTTPException(403, "No puedes consultar ni modificar este usuario.")
