@@ -1,0 +1,9 @@
+import { useState } from 'react';
+import { Compass, LogIn, ShieldCheck } from 'lucide-react';
+import { Field, FormError } from '../components/common.jsx';
+
+export default function Login({onLogin,error:externalError}) {
+  const [correo,setCorreo]=useState(''); const [contrasena,setContrasena]=useState(''); const [busy,setBusy]=useState(false); const [error,setError]=useState('');
+  async function submit(e) { e.preventDefault(); setBusy(true); setError(''); try { await onLogin(correo,contrasena); } catch(e) { setError(e.message); } finally { setBusy(false); } }
+  return <main className="login-page"><section className="login-story"><span className="login-brand"><Compass size={30}/> Campus Quest<span>.</span></span><div><p className="pixel-tag">CQ / ADMIN</p><h1>Detrás de cada aventura,<br/>hay un gran campus.</h1><p>Un lugar para acompañar a tus exploradores,<br/>crear misiones y celebrar sus logros.</p></div><small>Hecho para explorar.</small></section><section className="login-form-wrap"><form onSubmit={submit} className="login-form"><span className="login-icon"><ShieldCheck size={28}/></span><p className="eyebrow">PANEL DE ADMINISTRACIÓN</p><h2>Tu próxima aventura<br/>comienza aquí.</h2><p className="subtitle">Ingresa con tu cuenta de administrador.</p><Field label="Correo electrónico"><input type="email" required autoComplete="username" value={correo} onChange={e => setCorreo(e.target.value)} placeholder="admin@tu-universidad.edu"/></Field><Field label="Contraseña"><input type="password" required maxLength={256} autoComplete="current-password" value={contrasena} onChange={e => setContrasena(e.target.value)}/></Field><FormError message={error || externalError}/><button className="primary-button" disabled={busy}>{busy ? 'Ingresando…' : 'Entrar al campus'}<LogIn size={16}/></button><p className="login-note">Acceso exclusivo para gestores del campus.</p></form></section></main>;
+}
