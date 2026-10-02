@@ -165,3 +165,158 @@ un error JSON cuando Railway no responde. No cachea respuestas personales.
 
 No se ejecutó un deploy real en estos proveedores durante la preparación: las
 cuentas, URLs y variables de destino se configuran siguiendo esta guía.
+
+## Alternativa: Docker y un único dominio
+
+Una imagen Docker compila React en una etapa Node y ejecuta FastAPI en la etapa
+Python. FastAPI sirve `frontend/dist` y `/api/v1` desde la misma dirección.
+Caddy puede proporcionar HTTPS y certificados automáticamente.
+
+Esta estructura sigue el despliegue con [imagen propia recomendado por FastAPI](https://fastapi.tiangolo.com/deployment/docker/).
+[Vite preview](https://vite.dev/guide/static-deploy) se reserva para revisar una
+compilación local. El proceso de producción es Uvicorn, con un worker en el
+MVP SQLite.
+
+## Docker local
+
+Desde la raíz:
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+docker compose exec app python -m backend.cli init
+docker compose exec app python -m backend.cli create-admin --email admin@tu-universidad.edu
+```
+
+Abre <http://localhost:8000>. Para consultar el estado y los logs:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 app
+curl http://localhost:8000/api/v1/health
+```
+
+La imagen ejecuta la aplicación con un usuario sin privilegios. El volumen
+`campus_data` conserva `/app/data`; el puerto de FastAPI se expone únicamente
+en `127.0.0.1` del servidor. No hay administrador ni registros ficticios al
+arrancar: se crean mediante los comandos anteriores.
+
+## Servidor con dominio y HTTPS
+
+Necesitas un servidor Linux con Docker, DNS del dominio apuntando al servidor
+y puertos 80/443 disponibles. Configura `.env`:
+
+```dotenv
+APP_ENV=production
+COOKIE_SECURE=true
+DATABASE_URL=sqlite:////app/data/campus_quest.db
+SESSION_TTL_HOURS=24
+DOMAIN=campus.tu-dominio.edu
+SITE_ORIGIN=https://campus.tu-dominio.edu
+ALLOWED_ORIGINS=https://campus.tu-dominio.edu
+```
+
+Después:
+
+```bash
+docker compose --profile production up -d --build
+docker compose exec app python -m backend.cli init
+docker compose exec app python -m backend.cli create-admin --email admin@tu-universidad.edu
+```
+
+La dirección será `https://campus.tu-dominio.edu`. Android, posteriormente,
+usará `https://campus.tu-dominio.edu/api/v1/`.
+
+`APP_ENV=production` exige `COOKIE_SECURE=true`. Abre el panel por **HTTPS**:
+una cookie Secure no se enviará al acceder directamente al puerto HTTP 8000.
+Caddy se comunica con FastAPI por la red privada de Compose; la lista explícita
+de orígenes autoriza el dominio público para las mutaciones web.
+
+Conserva los volúmenes `caddy_data` y `caddy_config` para mantener certificados.
+No ejecutes `docker compose down -v` si quieres conservar datos: esa opción
+borra los volúmenes.
+
+## Otro hosting de contenedores
+
+También puedes construir y ejecutar el Dockerfile en un servicio que soporte
+contenedores. Configura:
+
+1. Puerto de aplicación: `8000`.
+2. HTTPS del proveedor delante de Uvicorn.
+3. `APP_ENV=production`, `COOKIE_SECURE=true` y `ALLOWED_ORIGINS` con el origen
+   público exacto, incluido `https://`.
+4. Volumen persistente montado en `/app/data` si usas SQLite, o una BD PostgreSQL.
+5. Variable de construcción `VITE_DATA_MODE=api`; URL web `/api/v1`.
+6. Ejecutar `python -m backend.cli init` y crear el admin mediante una consola
+   del servicio. No introducir contraseñas en argumentos de construcción.
+
+Un filesystem efímero pierde SQLite al reemplazar el contenedor. No desplegar
+varias réplicas con SQLite: usar una sola instancia o pasar a PostgreSQL.
+
+## PostgreSQL
+
+`psycopg` ya está incluido. Configura una instancia PostgreSQL del proveedor:
+
+```dotenv
+DATABASE_URL=postgresql+psycopg://usuario:contraseña@host:5432/campus_quest
+```
+
+Si el proveedor requiere TLS, conserva sus parámetros, por ejemplo
+`?sslmode=require`. Usa credenciales como variables secretas del servidor.
+Cambiar la URL no copia datos desde SQLite: antes de migrar una instalación
+existente, planifica la exportación/importación y prueba que IDs, relaciones,
+puntuación y secuencias se conservan.
+
+`init` crea tablas e inserta el catálogo inicial. No representa un sistema de
+migraciones de esquema. Antes de una segunda versión que cambie modelos,
+incorporar Alembic, ejecutar las migraciones y comprobar una copia de BD.
+Consulta [SQLAlchemy PostgreSQL](https://docs.sqlalchemy.org/en/20/dialects/postgresql.html#module-sqlalchemy.dialects.postgresql.psycopg).
+
+## Actualizar el servicio
+
+Con una copia de seguridad y sin cambios de esquema pendientes:
+
+```bash
+git pull
+docker compose --profile production up -d --build
+docker compose logs --tail=100 app
+```
+
+Para una instalación local sin proxy, omite `--profile production`.
+El volumen conserva usuarios, sesiones y progreso. No vuelvas a sembrar datos
+ficticios ni recrees el administrador. `init` es idempotente para los registros
+del catálogo que ya existen, pero no debe usarse para restaurar automáticamente
+un catálogo editado en una instalación activa.
+
+## Copias de seguridad SQLite
+
+Usa la API de backup de SQLite, que crea una copia consistente mientras el
+servicio está disponible:
+
+```bash
+docker compose exec app python -c "import sqlite3; src=sqlite3.connect('/app/data/campus_quest.db'); dst=sqlite3.connect('/app/data/backup.db'); src.backup(dst); dst.close(); src.close()"
+docker compose cp app:/app/data/backup.db ./campus-quest-backup.db
+```
+
+Estos ejemplos suponen el nombre de archivo configurado para Docker. Si
+cambiaste `DATABASE_URL`, adapta las rutas. La copia contiene datos personales
+y hashes de sesión/contraseña: guárdala fuera de Git, con acceso restringido.
+Prueba su restauración en una instancia aparte antes de depender de ella.
+Para PostgreSQL usa backups administrados o `pg_dump` y un procedimiento de
+restauración probado.
+
+## Resolver problemas frecuentes
+
+| Problema | Comprobación |
+|---|---|
+| Login no conserva la sesión | HTTPS + Secure coherentes; misma dirección web/API; cookie enviada |
+| 403 al guardar con cookie | `ALLOWED_ORIGINS` contiene el origen exacto; no incluye rutas |
+| Panel devuelve HTML como respuesta API | Usa `/api/v1`; revisa proxy Vite y servidor FastAPI |
+| Panel sigue mostrando demo | `VITE_DATA_MODE` se aplica al compilar; reconstruye la imagen |
+| Usuarios vacíos | `init` solo crea catálogo; crea admin y, para pruebas, `seed-demo` |
+| Docker no conecta al daemon | Inicia Docker Engine; tener el CLI instalado no es suficiente |
+| SQLite desaparece al redeploy | Asegura volumen persistente; evita `down -v` |
+| Android no conecta a localhost | Usa `10.0.2.2` en el emulador o `adb reverse`; ver ANDROID.md |
+
+En CORS con credenciales se requieren orígenes específicos, no `*`:
+[documentación FastAPI](https://fastapi.tiangolo.com/tutorial/cors/).
