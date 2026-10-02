@@ -86,3 +86,53 @@ def test_student_and_tutor_do_not_have_admin_rights(api):
     assert api.client.get(f"/api/v1/usuarios/{api.users['student']}/progreso", headers=student).json() == []
     assert api.client.get(f"/api/v1/usuarios/{api.users['other']}/progreso", headers=student).status_code == 403
     assert api.client.post(f"/api/v1/usuarios/{api.users['other']}/progreso", json={"misionId": 1, "codigoQr": "CQ-BIB-001"}, headers=student).status_code == 403
+
+
+def test_completion_is_idempotent_and_preserves_archived_history(api):
+    student = login(api, "student")
+    route = f"/api/v1/usuarios/{api.users['student']}/progreso"
+    payload = {"misionId": 1, "codigoQr": "  cq-bib-001  "}
+    first = api.client.post(route, json=payload, headers=student)
+    assert first.status_code == 201
+    assert first.json()["codigoQrValidado"] == "CQ-BIB-001"
+    assert first.json()["fechaHora"] > 1_000_000_000_000
+    repeated = api.client.post(route, json=payload, headers=student)
+    assert repeated.status_code == 200
+    assert repeated.json() == first.json()
+    admin = login(api)
+    assert api.client.delete("/api/v1/misiones/1", headers=admin).json()["activa"] is False
+    assert 1 not in [m["id"] for m in api.client.get("/api/v1/misiones", headers=student).json()]
+    assert any(m["id"] == 1 for m in api.client.get("/api/v1/misiones?incluirArchivadas=true", headers=admin).json())
+    assert api.client.get(route, headers=student).json() == [first.json()]
+    assert api.client.post(route, json=payload, headers=student).json() == first.json()
+    user = api.client.get(f"/api/v1/usuarios/{api.users['student']}", headers=admin).json()
+    assert (user["puntajeAcumulado"], user["nivel"]) == (50, 1)
+    assert api.client.delete("/api/v1/puntos/1", headers=admin).status_code == 409
+
+
+def test_invalid_qr_archived_mission_and_missing_resources(api):
+    student = login(api, "student")
+    route = f"/api/v1/usuarios/{api.users['student']}/progreso"
+    assert api.client.post(route, json={"misionId": 1, "codigoQr": "wrong"}, headers=student).status_code == 422
+    assert api.client.post(route, json={"misionId": 999, "codigoQr": "x"}, headers=student).status_code == 404
+    admin = login(api)
+    api.client.delete("/api/v1/misiones/1", headers=admin)
+    assert api.client.post(route, json={"misionId": 1, "codigoQr": "CQ-BIB-001"}, headers=student).status_code == 409
+    assert api.client.get("/api/v1/usuarios/999", headers=admin).status_code == 404
+    assert api.client.get("/api/v1/usuarios/999/progreso", headers=admin).status_code == 404
+
+
+def test_concurrent_completion_awards_once_and_keeps_all_totals(api):
+    student = login(api, "student")
+    route = f"/api/v1/usuarios/{api.users['student']}/progreso"
+    def complete(mission_id):
+        qr = {1: "CQ-BIB-001", 2: "CQ-SEC-002", 3: "CQ-LAB-003"}[mission_id]
+        return api.client.post(route, json={"misionId": mission_id, "codigoQr": qr}, headers=student)
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        responses = list(executor.map(complete, [1, 1, 1, 1, 2, 2, 3, 3]))
+    assert [r.status_code for r in responses].count(201) == 3
+    assert all(r.status_code in {200, 201} for r in responses)
+    with api.app.state.database.sessions() as db:
+        user = db.get(Usuario, api.users["student"])
+        assert (user.puntajeAcumulado, user.nivel) == (160, 2)
+        assert db.scalar(select(func.count(ProgresoMision.id))) == 3
