@@ -1,0 +1,41 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        VITE_DATA_MODE: api
+        VITE_API_BASE_URL: /api/v1
+        VITE_SITE_ORIGIN: ${SITE_ORIGIN:-}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/campus_quest.db}
+      APP_ENV: ${APP_ENV:-development}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8000}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-24}
+      FRONTEND_DIST_DIR: /app/frontend/dist
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - campus_data:/app/data
+    restart: unless-stopped
+  proxy:
+    image: caddy:2-alpine
+    profiles: [production]
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  campus_data:
+  caddy_data:
+  caddy_config:
