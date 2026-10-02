@@ -11,6 +11,12 @@ sesión web en el mismo origen. Railway sigue disponible como alternativa;
 también se incluye Docker para ejecutar todo junto. Android podrá consumir
 directamente la API del backend en la siguiente etapa.
 
+### Despliegue publicado
+
+- Panel web: <https://campus-quest-admin.vercel.app>
+- API Render: <https://campus-quest-api-prod.onrender.com>
+- Salud de la API: <https://campus-quest-api-prod.onrender.com/api/v1/health>
+
 ## Qué funciona
 
 - Resumen calculado desde usuarios y progreso, ranking y actividad semanal.
