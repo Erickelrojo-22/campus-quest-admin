@@ -36,3 +36,29 @@ export function createApiClient(baseUrl='/api/v1',fetcher=globalThis.fetch) {
     savePoint:(p) => { const {id,...body}=p; return request(`/puntos${id ? `/${id}` : ''}`,{method:id ? 'PUT' : 'POST',body:JSON.stringify(body)}); },
   };
 }
+
+export function createDemoClient() {
+  let data=createDemoData();
+  const clone=(v) => structuredClone(v);
+  return {
+    mode:'demo', baseUrl:'',
+    me:async () => ({id:0,nombres:'Administrador',rol:'admin'}),
+    load:async () => clone(data),
+    async saveMission(m) {
+      if (!data.puntos.some(p => p.id===m.puntoInteresId)) throw new ApiError('Selecciona un punto existente.',422);
+      const old=data.misiones.find(x => x.id===m.id);
+      if (old && old.puntoInteresId!==m.puntoInteresId && data.progreso.some(p => p.misionId===m.id)) throw new ApiError('La misión tiene progreso registrado. Conserva su punto de interés.',409);
+      const next={...m,id:m.id || Math.max(0,...data.misiones.map(x => x.id))+1};
+      data.misiones=m.id ? data.misiones.map(x => x.id===m.id ? next : x) : [...data.misiones,next];
+      return clone(next);
+    },
+    async archiveMission(id) { data.misiones=data.misiones.map(m => m.id===id ? {...m,activa:false} : m); },
+    async savePoint(p) {
+      const next={...p,codigoQr:p.codigoQr.trim().toUpperCase(),id:p.id || Math.max(0,...data.puntos.map(x => x.id))+1};
+      if (data.puntos.some(x => x.id!==p.id && x.codigoQr===next.codigoQr)) throw new ApiError('Este código QR ya pertenece a otro punto.',409);
+      data.puntos=p.id ? data.puntos.map(x => x.id===p.id ? next : x) : [...data.puntos,next];
+      return clone(next);
+    },
+    async reset() { data=createDemoData(); },
+  };
+}
