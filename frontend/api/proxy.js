@@ -9,7 +9,7 @@ export function createProxy(fetcher=globalThis.fetch,getBackendUrl=() => process
     try {
       origin=new URL(getBackendUrl());
       if (origin.protocol!=='https:' || origin.pathname!=='/' || origin.search || origin.hash || origin.username || origin.password) throw new Error();
-    } catch { return fail(503,'Configura BACKEND_URL en Vercel con el origen HTTPS de Railway.'); }
+    } catch { return fail(503,'Configura BACKEND_URL en Vercel con el origen HTTPS del backend.'); }
     const incoming=new URL(req.url,'https://proxy.invalid');
     const raw=req.query?.path ?? incoming.searchParams.get('path') ?? '';
     if (typeof raw!=='string') return fail(404,'Ruta API no encontrada.');
@@ -24,7 +24,8 @@ export function createProxy(fetcher=globalThis.fetch,getBackendUrl=() => process
       const value=req.headers[name];
       if (value) headers[name]=Array.isArray(value) ? value.join(', ') : value;
     }
-    const options={method:req.method,headers,redirect:'manual',signal:AbortSignal.timeout(25000)};
+    // Give a sleeping free-tier backend time to start; send each request once.
+    const options={method:req.method,headers,redirect:'manual',signal:AbortSignal.timeout(90000)};
     try {
       if (!['GET','HEAD'].includes(req.method) && req.body!==undefined && req.body!==null) {
         if (headers['content-type'] && !headers['content-type'].toLowerCase().startsWith('application/json')) return fail(415,'Esta API solo acepta cuerpos JSON.');
@@ -47,7 +48,7 @@ export function createProxy(fetcher=globalThis.fetch,getBackendUrl=() => process
       res.status(upstream.status);
       if (req.method==='HEAD' || upstream.status===204) return res.end();
       return res.send(Buffer.from(await upstream.arrayBuffer()));
-    } catch { return fail(502,'No se pudo contactar con el backend en Railway. Revisa BACKEND_URL y el estado del servicio.'); }
+    } catch { return fail(502,'No se pudo contactar con el backend. Revisa BACKEND_URL y el estado del servicio.'); }
   };
 }
 export default createProxy();

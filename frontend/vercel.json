@@ -5,7 +5,7 @@
   "outputDirectory": "dist",
   "functions": {
     "api/proxy.js": {
-      "maxDuration": 30
+      "maxDuration": 120
     }
   },
   "rewrites": [
@@ -13,5 +13,6 @@
       "source": "/api/v1/:path*",
       "destination": "/api/proxy?path=:path*"
     }
-  ]
+  ],
+  "fluid": true
 }

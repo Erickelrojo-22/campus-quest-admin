@@ -5,7 +5,7 @@
 ```mermaid
 flowchart LR
     WEB[React · Vercel] -->|/api/v1 + cookie HttpOnly| PROXY[Función proxy Vercel]
-    PROXY -->|HTTPS + Cookie + Origin| API[FastAPI · Railway]
+    PROXY -->|HTTPS + Cookie + Origin| API[FastAPI · Render]
     ANDROID[Android · futura capa remota] -.->|HTTPS /api/v1 + Bearer| API
     API --> SQL[(SQLite o PostgreSQL)]
     ANDROID --> ROOM[(Room · caché local futura)]
@@ -17,9 +17,9 @@ trabajo de la próxima etapa, no una sincronización ya implementada.
 
 En desarrollo, Vite sirve React en el puerto 5173 y reenvía `/api` a FastAPI
 en 8000. En el despliegue previsto, Vercel sirve React y su función `api/proxy.js`
-reenvía `/api/v1` a Railway. La cookie se guarda en el dominio web Vercel;
+reenvía `/api/v1` a Render. La cookie se guarda en el dominio web Vercel;
 el proxy conserva Origin para la comprobación del backend. Android podrá
-consumir Railway directamente con Bearer. Como alternativa, Docker sirve
+consumir Render directamente con Bearer. Como alternativa, Docker sirve
 todo junto con FastAPI y Caddy puede terminar HTTPS.
 
 ## Modelos conservados de Android

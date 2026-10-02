@@ -1,5 +1,10 @@
 .git
 .venv
+.vercel
+frontend/.vercel
+deploy/local
+backend/data
+/data
 **/node_modules
 **/dist
 **/__pycache__
@@ -11,11 +16,5 @@
 **/*.db
 **/*.db-shm
 **/*.db-wal
-data
-backend/data
 .aws
-frontend/.openai
 *.tar.gz
-deploy/local
-.vercel
-frontend/.vercel

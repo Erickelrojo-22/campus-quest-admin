@@ -17,3 +17,6 @@ __pycache__/
 /backend/data/
 .aws
 *.tar.gz
+/.vercel/
+/frontend/.vercel/
+/deploy/local/

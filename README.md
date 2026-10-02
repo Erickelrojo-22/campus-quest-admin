@@ -5,10 +5,11 @@ misiones, lugares del campus, insignias e informes CSV. El panel usa **React 19,
 Vite y Tailwind CSS**; el servidor usa **FastAPI y SQLAlchemy**.
 
 El frontend está dentro de `frontend/`. El backend está fuera de esa carpeta,
-en `backend/`. El despliegue previsto es **backend en Railway y frontend en Vercel**.
-Un proxy en Vercel conecta `/api/v1` con Railway y conserva la sesión web
-en el mismo origen. También se incluye Docker para ejecutar todo junto.
-Android podrá consumir directamente la API de Railway en la siguiente etapa.
+en `backend/`. El despliegue del MVP gratuito usa **backend en Render y frontend
+en Vercel**. Un proxy en Vercel conecta `/api/v1` con FastAPI y conserva la
+sesión web en el mismo origen. Railway sigue disponible como alternativa;
+también se incluye Docker para ejecutar todo junto. Android podrá consumir
+directamente la API del backend en la siguiente etapa.
 
 ## Qué funciona
 
@@ -40,7 +41,7 @@ campus-quest-admin/
 │   ├── src/data/              # Catálogo Android y usuarios ficticios
 │   ├── public/                # Mapa, fuente de marca y tarjeta social
 │   ├── tests/                 # Contrato HTTP, demo y exportación
-│   ├── api/proxy.js          # Proxy Vercel → Railway
+│   ├── api/proxy.js          # Proxy Vercel → FastAPI
 │   ├── vercel.json
 │   ├── .env.example
 │   └── package.json
@@ -143,20 +144,32 @@ Abre <http://localhost:8000>. FastAPI sirve el dashboard y `/api/v1` en el mismo
 origen. Esto reproduce la arquitectura de despliegue. `vite preview` sirve
 solo para revisión local y no es el servidor de producción.
 
-## 4. Railway + Vercel: despliegue recomendado
+## 4. Render + Vercel: MVP gratuito
 
-Sigue [la guía completa de despliegue](docs/DEPLOY.md#railway--vercel).
+Sigue [la guía completa de despliegue](docs/DEPLOY.md#render--vercel-mvp-gratuito).
 
-- **Railway**: raíz del repositorio, `Dockerfile.backend`, PostgreSQL,
-  `APP_ENV=production`, `COOKIE_SECURE=true` y `ALLOWED_ORIGINS` con la URL Vercel.
+- **Render**: Web Service desde la raíz, runtime **Python 3** explícito,
+  `PYTHON_VERSION=3.13.16`, build `pip install -r requirements.txt` y start
+  `uvicorn backend.app:app --host 0.0.0.0 --port $PORT --workers 1`.
+- **PostgreSQL Render**: URL interna secreta solo en backend,
+  `APP_ENV=production`, `COOKIE_SECURE=true` y `ALLOWED_ORIGINS` con el origen
+  HTTPS exacto de Vercel. Inicializa catálogo/admin desde tu equipo mediante
+  la URL externa con SSL: el plan Free carece de SSH y pre-deploy.
 - **Vercel**: Root Directory `frontend`, framework Vite, build `npm run build`,
-  salida `dist` y Node 24.
+  salida `dist`, Node 24 y Fluid Compute activo para el proxy de hasta 120 s.
 - **Variables Vercel**: `VITE_DATA_MODE=api`, `VITE_API_BASE_URL=/api/v1`,
-  `BACKEND_URL=https://tu-backend.up.railway.app` y
-  `VITE_API_DOCS_URL=https://tu-backend.up.railway.app/docs`.
+  `BACKEND_URL=https://tu-backend.onrender.com` y
+  `VITE_API_DOCS_URL=https://tu-backend.onrender.com/docs`.
 
 El proxy incluido reenvía las cookies y el Origin del navegador. No necesitas
 cambiar a cookies entre dominios ni exponer una credencial del backend en React.
+Las URLs anteriores son ejemplos. Render Free pausa la API tras 15 minutos
+sin tráfico y su PostgreSQL gratuito expira a los 30 días; sirve para revisar
+el MVP. Antes de guardar datos de uso continuo, programa una migración o cambia
+el plan de la base de datos. [Límites oficiales de Render](https://render.com/docs/free).
+
+La [alternativa Railway + Vercel](docs/DEPLOY.md#railway--vercel-alternativa)
+usa `Dockerfile.backend` y PostgreSQL, conservando el mismo contrato y proxy.
 
 ## 5. Docker: todo en un servicio
 
@@ -188,6 +201,7 @@ actualizaciones en [docs/DEPLOY.md](docs/DEPLOY.md).
 | Variable | Dónde | Uso |
 |---|---|---|
 | `DATABASE_URL` | Backend | SQLite o `postgresql+psycopg://...` |
+| `PYTHON_VERSION` | Render, runtime nativo | `3.13.16`, versión fijada para el MVP |
 | `APP_ENV` | Backend | `development` o `production` |
 | `COOKIE_SECURE` | Backend | `false` en HTTP local; `true` con HTTPS |
 | `ALLOWED_ORIGINS` | Backend | Orígenes autorizados, separados por comas |
@@ -196,8 +210,8 @@ actualizaciones en [docs/DEPLOY.md](docs/DEPLOY.md).
 | `VITE_DATA_MODE` | Frontend, al compilar | `api` o `demo` |
 | `VITE_API_BASE_URL` | Frontend, al compilar | `/api/v1` para el mismo origen |
 | `API_PROXY_TARGET` | Vite, desarrollo | Servidor al que reenvía `/api` |
-| `BACKEND_URL` | Función Vercel | Origen HTTPS de Railway, sin `/api/v1` |
-| `VITE_API_DOCS_URL` | Frontend | Enlace público a Swagger en Railway |
+| `BACKEND_URL` | Función Vercel | Origen HTTPS del backend, sin `/api/v1` |
+| `VITE_API_DOCS_URL` | Frontend | Enlace público a Swagger del backend |
 | `VITE_SITE_ORIGIN` | Frontend, al compilar | Origen HTTPS de la tarjeta social |
 | `DOMAIN` | Compose, perfil producción | Dominio público de Caddy |
 | `SITE_ORIGIN` | Compose, al compilar | Se pasa a `VITE_SITE_ORIGIN` |

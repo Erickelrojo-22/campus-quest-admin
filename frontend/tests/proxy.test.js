@@ -35,7 +35,10 @@ test('proxy impide cambiar el origen o escapar de /api/v1',async () => {
 
 test('configuración inválida y backend caído devuelven JSON',async () => {
   const missing=response();await createProxy(fetch,() => undefined)(request(),missing);assert.equal(missing.statusCode,503);
-  const offline=response();await createProxy(async () => {throw new Error('Offline');},() => 'https://backend.example.com')(request(),offline);assert.equal(offline.statusCode,502);assert.ok(offline.body.detail);
+  let calls=0;
+  const offline=response();await createProxy(async () => {calls++;throw new Error('Offline');},() => 'https://backend.example.com')(request({method:'POST',body:{titulo:'Nueva misión'}}),offline);assert.equal(offline.statusCode,502);assert.ok(offline.body.detail);
+  assert.equal(calls,1,'Una mutación fallida no debe reenviarse automáticamente.');
+  assert.doesNotMatch(offline.body.detail,/Railway/);
 });
 
 test('proxy rechaza paths duplicados y JSON inválido antes de llamar al backend',async () => {
