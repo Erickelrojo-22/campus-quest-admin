@@ -136,3 +136,89 @@ def test_concurrent_completion_awards_once_and_keeps_all_totals(api):
         user = db.get(Usuario, api.users["student"])
         assert (user.puntajeAcumulado, user.nivel) == (160, 2)
         assert db.scalar(select(func.count(ProgresoMision.id))) == 3
+
+
+def test_point_crud_normalizes_qr_and_enforces_uniqueness(api):
+    admin = login(api)
+    body = point_body(api, admin)
+    duplicate = {**body, "codigoQr": "  cq-bib-001  "}
+    assert api.client.post("/api/v1/puntos", json=duplicate, headers=admin).status_code == 409
+    created = api.client.post("/api/v1/puntos", json={**body, "nombre": "Nuevo punto", "codigoQr": " cq-new-009 "}, headers=admin)
+    assert created.status_code == 201
+    assert created.json()["codigoQr"] == "CQ-NEW-009"
+    point_id = created.json()["id"]
+    assert api.client.put(f"/api/v1/puntos/{point_id}", json=duplicate, headers=admin).status_code == 409
+    assert api.client.delete(f"/api/v1/puntos/{point_id}", headers=admin).status_code == 204
+
+
+@pytest.mark.parametrize("field,value", [("puntos", 0), ("puntos", -1), ("puntos", True), ("puntos", "30"), ("tiempoEstimadoMin", 0), ("dificultad", "Extrema"), ("titulo", " "), ("activa", "true")])
+def test_mission_validation(api, field, value):
+    admin = login(api)
+    body = mission_body(api, admin)
+    assert api.client.post("/api/v1/misiones", json={**body, field: value}, headers=admin).status_code == 422
+
+
+@pytest.mark.parametrize("field,value", [("posX", -0.1), ("posY", 1.1), ("posX", True), ("categoria", "Otro"), ("codigoQr", " ")])
+def test_point_validation(api, field, value):
+    admin = login(api)
+    body = point_body(api, admin)
+    assert api.client.post("/api/v1/puntos", json={**body, field: value}, headers=admin).status_code == 422
+
+
+def test_mission_edits_do_not_rewrite_points_or_move_completed_history(api):
+    student = login(api, "student")
+    route = f"/api/v1/usuarios/{api.users['student']}/progreso"
+    api.client.post(route, json={"misionId": 1, "codigoQr": "CQ-BIB-001"}, headers=student)
+    admin = login(api)
+    body = mission_body(api, admin)
+    assert api.client.put("/api/v1/misiones/1", json={**body, "puntoInteresId": 2}, headers=admin).status_code == 409
+    assert api.client.put("/api/v1/misiones/1", json={**body, "puntos": 100}, headers=admin).status_code == 200
+    assert api.client.get(route, headers=student).json()[0]["puntosObtenidos"] == 50
+    assert api.client.post("/api/v1/misiones", json={**body, "puntoInteresId": 999}, headers=admin).status_code == 404
+    assert api.client.post("/api/v1/misiones", json={**body, "id": 99}, headers=admin).status_code == 422
+
+
+def test_cli_demo_is_explicit_idempotent_and_without_passwords(api):
+    database = api.app.state.database
+    seed_demo(database)
+    seed_demo(database)
+    with database.sessions() as db:
+        demos = db.scalars(select(Usuario).where(Usuario.correoInstitucional.like("demo.%"))).all()
+        assert len(demos) == 12
+        assert all(u.rol == "estudiante" and not u.contrasenaHash for u in demos)
+        for user in demos:
+            total = db.scalar(select(func.coalesce(func.sum(ProgresoMision.puntosObtenidos), 0)).where(ProgresoMision.usuarioId == user.id))
+            assert user.puntajeAcumulado == total
+            assert user.nivel == 1 + total // 100
+    with pytest.raises(ValueError, match="Ya existe"):
+        create_admin(database, "admin@live.uleam.edu.ec", PASSWORD)
+
+
+def test_production_requires_secure_cookies_and_exact_cors():
+    with pytest.raises(ValueError, match="COOKIE_SECURE"):
+        Settings(app_env="production", cookie_secure=False)
+    with pytest.raises(ValueError, match="explícitos"):
+        Settings(allowed_origins=("*",))
+
+
+def test_cookie_httponly_samesite_and_cli_password_bounds(api):
+    response = api.client.post("/api/v1/auth/login", json={"correo": "admin@live.uleam.edu.ec", "contrasena": PASSWORD})
+    cookie = response.headers["set-cookie"]
+    assert COOKIE_NAME in cookie and "HttpOnly" in cookie and "SameSite=lax" in cookie
+    for email, password in (("@", PASSWORD), ("someone@example.com", "x" * 257), ("someone@example.com", "short")):
+        with pytest.raises(ValueError, match="correo válido"):
+            create_admin(api.app.state.database, email, password)
+
+
+def test_database_foreign_keys_and_duplicate_progress_are_enforced(api):
+    from sqlalchemy.exc import IntegrityError
+    database = api.app.state.database
+    raw = {"usuarioId": api.users["student"], "misionId": 1, "fechaHora": now_ms(), "puntosObtenidos": 50, "codigoQrValidado": "CQ-BIB-001", "estado": "completada"}
+    with database.sessions.begin() as db:
+        db.add(ProgresoMision(**raw))
+    with pytest.raises(IntegrityError):
+        with database.sessions.begin() as db:
+            db.add(ProgresoMision(**raw))
+    with pytest.raises(IntegrityError):
+        with database.sessions.begin() as db:
+            db.add(ProgresoMision(**{**raw, "usuarioId": 99999}))
