@@ -89,3 +89,79 @@ necesitas dejar `ADMIN_PASSWORD` en variables permanentes ni ejecutar
 `railway run` ejecuta comandos **localmente** con variables del proyecto; una
 URL privada PostgreSQL puede no resolver desde tu equipo. Para estos comandos
 usa [railway ssh](https://docs.railway.com/cli/ssh), que se ejecuta en el servicio.
+
+### 3. Preparar Vercel
+
+Importa el mismo repositorio y configura:
+
+| Opción | Valor |
+|---|---|
+| Root Directory | `frontend` |
+| Framework Preset | `Vite` |
+| Node.js Version | `24.x` |
+| Install Command | `npm ci` |
+| Build Command | `npm run build` |
+| Output Directory | `dist` |
+
+Agrega estas variables al entorno Production:
+
+```dotenv
+VITE_DATA_MODE=api
+VITE_API_BASE_URL=/api/v1
+BACKEND_URL=https://tu-backend.up.railway.app
+VITE_API_DOCS_URL=https://tu-backend.up.railway.app/docs
+VITE_SITE_ORIGIN=https://tu-dashboard.vercel.app
+```
+
+`BACKEND_URL` es **el origen HTTPS**, sin `/api/v1`, rutas, query o credenciales.
+Se usa solo dentro de la función de servidor. El navegador llama a `/api/v1`.
+`VITE_API_DOCS_URL` permite abrir Swagger directamente en Railway.
+`VITE_SITE_ORIGIN` es opcional para la tarjeta social; debe ser un origen HTTPS.
+
+`frontend/vercel.json` reescribe `/api/v1/:path*` hacia `api/proxy.js`. La función
+reenvía método, JSON, query, Cookie y Origin a Railway, y devuelve Set-Cookie y
+el código HTTP original. Así el navegador guarda la cookie para **Vercel**,
+con HttpOnly, Secure y SameSite=Lax. No depende de permitir cookies de terceros.
+El proxy no acepta una URL de backend enviada por el visitante.
+
+Vercel reconoce [funciones api/*.js en Vite](https://vercel.com/docs/frameworks/frontend/vite).
+Consulta también [rewrites](https://vercel.com/docs/routing/rewrites) y
+[runtime Node](https://vercel.com/docs/functions/runtimes/node-js).
+
+### 4. Cerrar la conexión entre los servicios
+
+Después de conocer el dominio definitivo Vercel, actualiza en Railway:
+
+```dotenv
+ALLOWED_ORIGINS=https://tu-dashboard.vercel.app
+```
+
+Si usas un dominio propio, añade ese origen exacto. Puedes separar varios con
+comas. No añadas `/api/v1` a un origen. Las previews Vercel necesitan sus
+orígenes explícitos y preferentemente un backend de pruebas; no abras la lista
+con `*` ni uses sin control el backend real para previews.
+
+Redeploy Railway si cambian sus variables. Redeploy Vercel si cambias variables
+frontend o la URL del backend: las variables `VITE_*` se incorporan al build.
+
+Verifica en la URL Vercel:
+
+1. `/api/v1/health` devuelve `{ "status": "ok" }`.
+2. Login administrativo abre el panel; recargar conserva la sesión.
+3. Crear y editar una misión persiste tras recargar.
+4. Archivar conserva el historial de los usuarios.
+5. Cerrar sesión impide volver a consultar `/api/v1/usuarios` con esa cookie.
+
+Android usará directamente `https://tu-backend.up.railway.app/api/v1/` con
+Bearer cuando se implemente la capa remota. No necesita el proxy Vercel.
+
+### Límites prácticos
+
+PostgreSQL está soportado, pero requiere una prueba en Railway antes de usar
+registros reales. Los tests locales se ejecutan sobre SQLite. Las funciones
+Vercel limitan el tamaño de petición/respuesta: al crecer, paginar usuarios y
+progreso. El proxy tiene timeout de 25 segundos y `maxDuration` de 30; devuelve
+un error JSON cuando Railway no responde. No cachea respuestas personales.
+
+No se ejecutó un deploy real en estos proveedores durante la preparación: las
+cuentas, URLs y variables de destino se configuran siguiendo esta guía.
