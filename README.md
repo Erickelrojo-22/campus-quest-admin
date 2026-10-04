@@ -1,21 +1,80 @@
 # Campus Quest · Panel web y API
 
-MVP para administrar Campus Quest: perfiles de usuarios, puntos, niveles,
-misiones, lugares del campus, insignias e informes CSV. El panel usa **React 19,
-Vite y Tailwind CSS**; el servidor usa **FastAPI y SQLAlchemy**.
+**El campus, una aventura.** Campus Quest conecta la exploración de la
+universidad con misiones, códigos QR, puntos e insignias. La aplicación móvil
+Android acompaña al estudiante; este repositorio contiene el panel web para
+gestionar el campus y la API que comparten ambos clientes.
 
-El frontend está dentro de `frontend/`. El backend está fuera de esa carpeta,
-en `backend/`. El despliegue del MVP gratuito usa **backend en Render y frontend
-en Vercel**. Un proxy en Vercel conecta `/api/v1` con FastAPI y conserva la
-sesión web en el mismo origen. Railway sigue disponible como alternativa;
-también se incluye Docker para ejecutar todo junto. Android podrá consumir
-directamente la API del backend en la siguiente etapa.
+![Resumen del panel web de Campus Quest](docs/images/campus-quest-overview.png)
 
-### Despliegue publicado
+*Panel publicado en Vercel y conectado a la API de Render. Captura con datos
+de prueba, tomada el 4 de octubre de 2026.*
 
-- Panel web: <https://campus-quest-admin.vercel.app>
-- API Render: <https://campus-quest-api-prod.onrender.com>
-- Salud de la API: <https://campus-quest-api-prod.onrender.com/api/v1/health>
+<details>
+<summary>Ver el mapa y los puntos del campus</summary>
+
+![Mapa de Campus Quest y detalle de un punto de interés](docs/images/campus-quest-web.png)
+
+El mapa y los lugares son los mismos que utiliza la aplicación Android.
+
+</details>
+
+| Componente | Qué hace | Tecnología |
+|---|---|---|
+| Aplicación móvil Campus Quest | Explorar el mapa, consultar misiones, validar QR y ver logros | Kotlin, Jetpack Compose y Room |
+| Panel web | Administrar lugares, misiones, usuarios e informes | React, Vite y Tailwind CSS |
+| API compartida | Autenticar, validar el progreso y calcular puntos | FastAPI y SQLAlchemy |
+| Base online | Conservar cuentas, catálogo, sesiones y completaciones | PostgreSQL en Render |
+
+### Abrir el proyecto publicado
+
+- [Panel web](https://campus-quest-admin.vercel.app)
+- [Documentación interactiva de la API](https://campus-quest-api-prod.onrender.com/docs)
+- [Estado de la API](https://campus-quest-api-prod.onrender.com/api/v1/health)
+
+El panel requiere una cuenta con permisos de administración. En Android se
+puede entrar con una cuenta institucional o crear una sesión de visitante.
+
+## Cómo se conectan la web y Android
+
+```mermaid
+flowchart LR
+    WEB["Panel web · React / Vercel"] -->|"/api/v1 · cookie HttpOnly"| PROXY["Proxy de Vercel"]
+    PROXY -->|"HTTPS · Cookie y Origin"| API["API compartida · FastAPI / Render"]
+    MOBILE["Campus Quest móvil · Kotlin / Compose"] -->|"HTTPS · token Bearer"| API
+    API -->|"SQLAlchemy · red interna"| DB[("PostgreSQL · Render")]
+    MOBILE <-->|"Copia local del catálogo y progreso"| CACHE[("Room · Android")]
+```
+
+**Desde la web:** el navegador consulta `/api/v1` en el dominio de Vercel.
+La función `frontend/api/proxy.js` reenvía la petición a Render y conserva la
+cookie de sesión. React muestra los datos que devuelve la API.
+
+**Desde Android:** `CampusApi` consulta directamente
+`https://campus-quest-api-prod.onrender.com/api/v1/`. El token de sesión viaja
+como Bearer y se guarda cifrado mediante Android Keystore. El repositorio
+remoto actualiza Room al abrir la app y cada 30 segundos mientras está visible.
+Las pantallas leen esa copia local del catálogo y del progreso.
+
+**Una base compartida:** los cambios del panel se guardan en PostgreSQL y llegan
+al móvil en su siguiente actualización. Una misión completada en Android
+aparece en el panel al actualizar sus datos. Los clientes se comunican con
+FastAPI; solo el backend accede a PostgreSQL.
+
+### De un QR a una insignia
+
+1. El estudiante elige una misión y escanea el QR del lugar, o introduce el
+   código manualmente desde Android.
+2. La app envía el ID de la misión y el código a
+   `POST /api/v1/usuarios/{id}/progreso`.
+3. El backend comprueba la sesión, el usuario, el QR y que la misión esté activa.
+4. En una transacción guarda la completación y calcula puntos, fecha y nivel.
+   Repetir la misma completación no vuelve a sumar puntos.
+5. Android actualiza la copia local y muestra la insignia. El panel puede
+   consultar ese mismo evento para sus estadísticas e informes.
+
+Consulta [la arquitectura completa](docs/ARCHITECTURE.md),
+[el contrato HTTP](docs/API.md) y [la integración móvil](docs/ANDROID.md).
 
 ## Qué funciona
 
@@ -27,15 +86,31 @@ directamente la API del backend en la siguiente etapa.
 - Login administrativo real, sesión HttpOnly y permisos verificados en servidor.
 - API de progreso: valida el QR, registra la misión y otorga puntos una sola vez,
   incluso con solicitudes simultáneas o reintentos.
-- SQLite persistente para el MVP; configuración alternativa para PostgreSQL.
+- PostgreSQL online compartido por web y Android; SQLite para desarrollo local.
 - Vista de demostración independiente, con registros ficticios **en memoria**.
 
-La app Android existente sigue usando Room local: **todavía no se sincroniza**
-con este servidor. No se modificó ese repositorio. El catálogo de ocho lugares,
-ocho misiones y el mapa se tomaron de
-`/home/elkindev/AndroidStudioProjects/Gamequest`. Los usuarios y el progreso de
-prueba son ficticios. Cursos, premios canjeables y registro público no forman
-parte de este MVP.
+La integración móvil ya está implementada en la rama
+`prueba/integracion-backend-web-android` del proyecto Android. Se comprobó una
+completación desde el emulador contra Render y su consulta desde el proxy web.
+El catálogo inicial contiene ocho lugares y ocho misiones del campus.
+
+### Perfiles y alcance
+
+| Perfil | Acceso |
+|---|---|
+| Estudiante | Catálogo, ranking y su propio progreso desde Android |
+| Visitante | Exploración y progreso mediante una sesión temporal |
+| Profesor o gestor con rol `admin` | Panel web, edición del catálogo y consulta administrativa |
+
+El registro público crea estudiantes; los permisos de administración se
+asignan de forma explícita. Una etiqueta de profesor o el antiguo rol `tutor`
+no conceden acceso administrativo por sí solos.
+
+Room permite consultar la última descarga sin conexión. Completar misiones
+requiere internet; todavía no hay una cola de envíos pendientes. Las cuentas
+y el progreso de la antigua base local del teléfono se conservan separados y
+no se importan automáticamente. La verificación de correo, recuperación de
+cuenta, cursos y premios canjeables quedan fuera de esta versión.
 
 ## Estructura
 
@@ -76,12 +151,12 @@ Requiere Node **22.13 o superior**; se recomienda Node 24 LTS.
 ```bash
 cd frontend
 npm ci
-npm run dev
+VITE_DATA_MODE=demo npm run dev
 ```
 
 Abre la dirección que Vite indique, normalmente <http://localhost:5173>.
-Sin `.env`, el panel abre en modo demo. Puedes explorar perfiles, crear misiones,
-archivarlas y cambiar lugares. **Recargar la página restablece la demo**.
+El comando anterior activa el modo demo. Puedes explorar perfiles, crear misiones,
+archivarlas y cambiar lugares. **Recargar la página restablece la demo**. El modo predeterminado del panel es API.
 No se necesita contraseña ni servidor Python para esta vista.
 
 ## 2. Ejecutar frontend + backend real
@@ -231,7 +306,7 @@ esas variables forman parte del JavaScript público del navegador.
 - [Arquitectura y decisiones](docs/ARCHITECTURE.md)
 - [Contrato API y ejemplos](docs/API.md)
 - [Despliegue y mantenimiento](docs/DEPLOY.md)
-- [Integración Android, próxima etapa](docs/ANDROID.md)
+- [Aplicación móvil e integración Android](docs/ANDROID.md)
 - [Verificación realizada y pendientes](docs/VALIDATION.md)
 
 ```bash
@@ -243,4 +318,5 @@ npm --prefix frontend run build
 Las pruebas del servidor cubren sesiones, permisos, privacidad, QR únicos,
 archivo, historial y completaciones concurrentes. Las del frontend verifican
 su adaptador HTTP y que los errores remotos no se sustituyan por datos demo.
-PostgreSQL y el despliegue HTTPS deben verificarse en el entorno de destino.
+La conexión de Android, PostgreSQL y el proxy HTTPS de producción se comprobó
+en la rama de integración; los resultados están en [VALIDATION.md](docs/VALIDATION.md).
