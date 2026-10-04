@@ -222,3 +222,86 @@ def test_database_foreign_keys_and_duplicate_progress_are_enforced(api):
     with pytest.raises(IntegrityError):
         with database.sessions.begin() as db:
             db.add(ProgresoMision(**{**raw, "usuarioId": 99999}))
+
+
+def test_mobile_registration_creates_student_and_login_preserves_password_spaces(api):
+    password = "  Mobile_password_123  "
+    response = api.client.post("/api/v1/auth/register", json={
+        "nombres": "Estudiante remoto", "correo": " NEW@live.uleam.edu.ec ",
+        "carrera": "Software", "contrasena": password,
+    })
+    assert response.status_code == 201
+    body = response.json()
+    assert body["usuario"]["rol"] == "estudiante"
+    assert body["usuario"]["puntajeAcumulado"] == 0
+    assert "contrasenaHash" not in body["usuario"]
+    api.client.cookies.clear()
+    headers = {"Authorization": "Bearer " + body["accessToken"]}
+    assert api.client.get("/api/v1/auth/me", headers=headers).status_code == 200
+    assert api.client.get("/api/v1/usuarios", headers=headers).status_code == 403
+    duplicate = api.client.post("/api/v1/auth/register", json={
+        "nombres": "Otra persona", "correo": "new@live.uleam.edu.ec",
+        "carrera": "Software", "contrasena": password,
+    })
+    assert duplicate.status_code == 409
+    assert api.client.post("/api/v1/auth/login", json={"correo": "new@live.uleam.edu.ec", "contrasena": password}).status_code == 200
+
+
+def test_mobile_registration_rejects_roles_and_noninstitutional_email(api):
+    payload = {"nombres": "Alumno", "correo": "user@example.com", "carrera": "Software", "contrasena": "password123"}
+    assert api.client.post("/api/v1/auth/register", json=payload).status_code == 422
+    payload.update(correo="user@live.uleam.edu.ec", rol="admin")
+    assert api.client.post("/api/v1/auth/register", json=payload).status_code == 422
+    payload.pop("rol")
+    payload["contrasena"] = "short"
+    assert api.client.post("/api/v1/auth/register", json=payload).status_code == 422
+
+
+def test_visitors_with_same_name_are_distinct_and_cannot_take_over_accounts(api):
+    first = api.client.post("/api/v1/auth/visitor", json={"nombres": "Admin"})
+    assert first.status_code == 201
+    api.client.cookies.clear()
+    second = api.client.post("/api/v1/auth/visitor", json={"nombres": "Admin"})
+    assert second.status_code == 201
+    one, two = first.json(), second.json()
+    assert one["usuario"]["id"] != two["usuario"]["id"]
+    assert one["usuario"]["rol"] == "visitante"
+    api.client.cookies.clear()
+    headers = {"Authorization": "Bearer " + one["accessToken"]}
+    assert api.client.get(f'/api/v1/usuarios/{two["usuario"]["id"]}/progreso', headers=headers).status_code == 403
+    from backend.models import Mision, PuntoInteres
+    with api.app.state.database.sessions() as db:
+        code = db.get(PuntoInteres, db.get(Mision, 1).puntoInteresId).codigoQr
+    assert api.client.post(f'/api/v1/usuarios/{one["usuario"]["id"]}/progreso', json={"misionId": 1, "codigoQr": code}, headers=headers).status_code == 201
+
+
+def test_personal_catalog_keeps_completed_archived_missions_only(api):
+    from backend.models import PuntoInteres, Mision
+    student = login(api, "student")
+    with api.app.state.database.sessions() as db:
+        code = db.get(PuntoInteres, db.get(Mision, 1).puntoInteresId).codigoQr
+    assert api.client.post(f'/api/v1/usuarios/{api.users["student"]}/progreso', json={"misionId": 1, "codigoQr": code}, headers=student).status_code == 201
+    admin = login(api)
+    for id in (1, 2):
+        assert api.client.delete(f"/api/v1/misiones/{id}", headers=admin).status_code == 200
+    catalog = api.client.get("/api/v1/catalogo", headers=student).json()
+    assert any(m["id"] == 1 and not m["activa"] for m in catalog)
+    assert not any(m["id"] == 2 for m in catalog)
+
+
+def test_ranking_exposes_no_credentials_or_emails(api):
+    response = api.client.get("/api/v1/ranking", headers=login(api, "student"))
+    assert response.status_code == 200
+    assert response.json()
+    assert all(set(u) == {"id", "nombres", "puntajeAcumulado", "nivel"} for u in response.json())
+    assert all(u["id"] != api.users["admin"] for u in response.json())
+    api.client.cookies.clear()
+    assert api.client.get("/api/v1/ranking").status_code == 401
+
+
+def test_mobile_auth_rejects_foreign_browser_origin(api):
+    for path, payload in [
+        ("visitor", {"nombres": "Visitante"}),
+        ("register", {"nombres": "Estudiante", "correo": "new@live.uleam.edu.ec", "carrera": "Software", "contrasena": "password123"}),
+    ]:
+        assert api.client.post(f"/api/v1/auth/{path}", json=payload, headers={"Origin": "https://hostile.example"}).status_code == 403

@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from .config import Settings
 from .database import Database
 from .models import Mision, ProgresoMision, PuntoInteres, Sesion, Usuario
-from .schemas import CompletarMision, Login, MisionInput, MisionPublica, ProgresoPublico, PuntoInput, PuntoPublico, SesionPublica, UsuarioPublico
-from .security import COOKIE_NAME, AuthContext, current_auth, now_ms, require_admin, require_owner, token_hash, verify_password
+from .schemas import CompletarMision, Login, Registro, Visitante, MisionInput, MisionPublica, ProgresoPublico, PuntoInput, PuntoPublico, SesionPublica, UsuarioPublico
+from .security import COOKIE_NAME, AuthContext, current_auth, hash_password, now_ms, require_admin, require_owner, token_hash, verify_password
 
 
 def get_db(request: Request):
@@ -65,7 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allowed = {same_origin, *settings.allowed_origins}
             bearer = request.headers.get("authorization", "").lower().startswith("bearer ")
             cookie_auth = bool(request.cookies.get(COOKIE_NAME)) and not bearer
-            is_login = request.url.path == "/api/v1/auth/login"
+            is_login = request.url.path in {"/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/visitor"}
             if (cookie_auth and not origin) or ((cookie_auth or is_login) and origin and origin not in allowed):
                 return JSONResponse(status_code=403, content={"detail": "Origen no permitido para esta operación."})
         response = await call_next(request)
@@ -78,6 +78,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db.execute(text("SELECT 1"))
         return {"status": "ok"}
 
+    def open_session(user: Usuario, response: Response, db: Session):
+        token = secrets.token_urlsafe(48)
+        db.add(Sesion(tokenHash=token_hash(token), usuarioId=user.id, expiraEn=now_ms() + settings.session_ttl_hours * 3_600_000))
+        db.commit()
+        response.set_cookie(COOKIE_NAME, token, max_age=settings.session_ttl_hours * 3600, httponly=True, secure=settings.cookie_secure, samesite="lax", path="/")
+        return SesionPublica(accessToken=token, usuario=UsuarioPublico.model_validate(user))
+
     @app.post("/api/v1/auth/login", response_model=SesionPublica)
     def login(body: Login, response: Response, db: Session = Depends(get_db)):
         user = db.scalar(select(Usuario).where(Usuario.correoInstitucional == body.correo.lower()))
@@ -85,11 +92,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         valid = verify_password(body.contrasena, user.contrasenaHash if user else dummy_hash)
         if user is None or not valid:
             raise HTTPException(401, "Correo o contraseña incorrectos.")
-        token = secrets.token_urlsafe(48)
-        db.add(Sesion(tokenHash=token_hash(token), usuarioId=user.id, expiraEn=now_ms() + settings.session_ttl_hours * 3_600_000))
-        db.commit()
-        response.set_cookie(COOKIE_NAME, token, max_age=settings.session_ttl_hours * 3600, httponly=True, secure=settings.cookie_secure, samesite="lax", path="/")
-        return SesionPublica(accessToken=token, usuario=UsuarioPublico.model_validate(user))
+        return open_session(user, response, db)
+
+    @app.post("/api/v1/auth/register", response_model=SesionPublica, status_code=201)
+    def register(body: Registro, response: Response, db: Session = Depends(get_db)):
+        user = Usuario(nombres=body.nombres, correoInstitucional=body.correo, carrera=body.carrera,
+                       contrasenaHash=hash_password(body.contrasena), rol="estudiante")
+        db.add(user)
+        # Flush keeps account creation and its first session in one transaction.
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "Ya existe una cuenta con ese correo.") from None
+        return open_session(user, response, db)
+
+    @app.post("/api/v1/auth/visitor", response_model=SesionPublica, status_code=201)
+    def visitor(body: Visitante, response: Response, db: Session = Depends(get_db)):
+        # Names are labels, never proof of ownership of an existing account.
+        user = Usuario(nombres=body.nombres, correoInstitucional=None, carrera="", rol="visitante")
+        db.add(user)
+        db.flush()
+        return open_session(user, response, db)
+
+    @app.get("/api/v1/ranking")
+    def ranking(_auth: AuthContext = Depends(current_auth), db: Session = Depends(get_db)):
+        users = db.scalars(select(Usuario).where(Usuario.rol.in_(["estudiante", "visitante"]))
+                           .order_by(Usuario.puntajeAcumulado.desc(), Usuario.id).limit(100)).all()
+        return [{"id": u.id, "nombres": u.nombres, "puntajeAcumulado": u.puntajeAcumulado,
+                 "nivel": u.nivel} for u in users]
+
+    @app.get("/api/v1/catalogo", response_model=list[MisionPublica])
+    def personal_catalog(auth: AuthContext = Depends(current_auth), db: Session = Depends(get_db)):
+        completed = select(ProgresoMision.misionId).where(ProgresoMision.usuarioId == auth.usuario.id)
+        return db.scalars(select(Mision).where(Mision.activa.is_(True) | Mision.id.in_(completed))
+                          .order_by(Mision.id)).all()
 
     @app.get("/api/v1/auth/me", response_model=UsuarioPublico)
     def me(auth: AuthContext = Depends(current_auth)):

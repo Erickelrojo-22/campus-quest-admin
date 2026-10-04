@@ -159,3 +159,19 @@ ambos formatos. Las rutas API desconocidas nunca devuelven el HTML de la SPA.
 Las llamadas de herramientas HTTP pueden usar Bearer para no depender de
 cookies y Origin. Para probar una mutación con cookie desde `curl`, agrega un
 `Origin` autorizado; un cliente sin esa cabecera recibe 403.
+
+## Integración móvil
+
+- `POST /api/v1/auth/register`: `{nombres, correo, carrera, contrasena}`.
+  Correo `@live.uleam.edu.ec`, contraseña 8–256 caracteres. Devuelve 201 y
+  `{accessToken, tokenType, usuario}`; el rol siempre es `estudiante`.
+  Un correo ya registrado devuelve 409. No verifica propiedad del correo.
+- `POST /api/v1/auth/visitor`: `{nombres}`. Devuelve 201 y una sesión de
+  visitante nueva. Un nombre repetido nunca recupera una cuenta existente.
+- `GET /api/v1/catalogo`: autenticado; catálogo activo más misiones archivadas
+  completadas por el usuario actual, para conservar su historial.
+- `GET /api/v1/ranking`: autenticado; hasta 100 estudiantes/visitantes,
+  ordenados por puntos, con `{id, nombres, puntajeAcumulado, nivel}`.
+
+Android envía `Authorization: Bearer <accessToken>` y se conecta directamente
+al origen Render; el panel web conserva cookies a través de Vercel.

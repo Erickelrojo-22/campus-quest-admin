@@ -1,115 +1,49 @@
-# Android: integración en la siguiente etapa
+# Android conectado a Render
 
-Repositorio analizado: `/home/elkindev/AndroidStudioProjects/Gamequest`.
-Actualmente usa Kotlin, Compose, Room y DataStore. `AppContainer.kt` inyecta
-repositorios locales; no hay cliente HTTP, permiso INTERNET ni backend remoto
-integrado. **Esta entrega no modifica ese proyecto**.
+Proyecto: `/home/elkindev/AndroidStudioProjects/Gamequest`.
+La URL de producción está en `app/build.gradle.kts`:
+`https://campus-quest-api-prod.onrender.com/api/v1/`.
 
-`docs/BACKEND.md` del proyecto Android proponía un servidor compartido. Ahora
-este repositorio implementa la primera API y documenta su contrato; la app
-móvil todavía necesita una capa remota.
+## Funcionamiento
 
-## Direcciones para probar después
+- `AppContainer` inyecta `CampusApi`, `SessionTokenStore` y `RemoteCampusRepository`.
+- Registro institucional: `POST auth/register`, cuenta estudiante, contraseña de
+  al menos 8 caracteres. El correo tiene formato institucional; esta versión
+  no verifica la propiedad del correo ni incluye recuperación de contraseña.
+- Login: `POST auth/login`, con contraseña sin recortar espacios.
+- Acceso rápido: `POST auth/visitor`, crea una cuenta nueva. El nombre nunca
+  permite recuperar una cuenta ajena. La sesión del visitante dura 24 horas;
+  al cerrar sesión o expirar no se puede recuperar sin credenciales.
+- Token Bearer cifrado con AES/GCM y una clave Android Keystore. No se
+  almacenan contraseñas en la caché remota.
+  [Referencia Android Keystore](https://developer.android.com/privacy-and-security/keystore).
+- Catálogo: `GET puntos` y `GET catalogo`, incluyendo misiones archivadas
+  que el usuario ya completó para reconstruir sus insignias e historial.
+- Progreso: `GET/POST usuarios/{id}/progreso`. El servidor valida el QR y
+  calcula fecha, puntos y nivel; las peticiones repetidas no duplican puntos.
+- Ranking: `GET ranking`, solo nombres, IDs, puntos y niveles; no expone correos.
+- Room conserva la última descarga en `campus_quest_remote.db`. La app
+  actualiza al abrirse y cada 30 segundos mientras está visible.
+- Sin conexión se puede leer la caché; completar misiones requiere conexión.
+  No existe todavía una cola de completaciones pendientes.
+- Logout borra el token local e intenta revocarlo en el servidor. Un 401
+  elimina la sesión y devuelve al login.
+- El catálogo se administra desde la web; Android no concede permisos tutor.
 
-| Entorno | URL base |
-|---|---|
-| Emulador Android Studio | `http://10.0.2.2:8000/api/v1/` |
-| Dispositivo USB con adb reverse | `http://127.0.0.1:8000/api/v1/` |
-| Dispositivo en la misma red | `http://IP_DEL_EQUIPO:8000/api/v1/` |
-| Producción | `https://tu-backend.up.railway.app/api/v1/` |
+## Datos anteriores del teléfono
 
-`10.0.2.2` es el alias al loopback del ordenador anfitrión; `localhost` dentro
-del emulador se refiere al propio Android. Véase
-[documentación de red del emulador](https://developer.android.com/studio/run/emulator-networking-address).
-Para probar por LAN, inicia Uvicorn con `--host 0.0.0.0` y permite el puerto en
-el firewall. Compose lo publica solo en localhost por defecto.
+La antigua base `campus_quest.db` se conserva sin modificar. Sus usuarios,
+contraseñas y progreso no se copian automáticamente al servidor. Los IDs
+locales no identifican cuentas remotas. Para migrarlos hay que verificar la
+identidad, definir qué historial se acepta y mapear cada usuario y misión.
+La sesión antigua de DataStore no se acepta como autenticación remota.
 
-Con USB:
+## Compilar
 
 ```bash
-adb devices
-adb reverse tcp:8000 tcp:8000
-adb reverse --list
+./gradlew :app:assembleDebug :app:testDebugUnitTest
 ```
 
-Para retirar la redirección:
-
-```bash
-adb reverse --remove tcp:8000
-```
-
-## Plan de implementación
-
-1. Definir registro institucional, recuperación de cuenta y acceso de visitante.
-   El MVP no incluye esos endpoints: no inventar registro en el cliente.
-2. Agregar permiso INTERNET y Retrofit/OkHttp o Ktor en Android.
-3. Crear DTOs remotos con los mismos campos camelCase del [contrato](API.md).
-4. Agregar un `ApiService`, almacenamiento protegido del token y manejo de
-   expiración 401. No tratar el ID local DataStore como autenticación remota.
-5. Inyectar el cliente en `AppContainer.kt`.
-6. Adaptar `AuthRepository` y `CampusRepository` para coordinar HTTP y Room.
-7. Guardar el catálogo remoto en Room y mantener las pantallas leyendo sus Flow,
-   de modo que Room actúe como caché y la UI siga disponible sin conexión.
-8. Crear una cola de completaciones pendientes, reenviar al recuperar la red y
-   marcar una recompensa como confirmada cuando el servidor la acepte.
-9. Migrar usuarios/IDs locales a IDs del servidor y resolver cuentas existentes
-   antes de sincronizar progreso. No unir personas solo por nombre.
-10. Retirar gestión administrativa móvil según la decisión de roles: admin web,
-    estudiante/visitante móvil. El rol `tutor` actual no equivale a admin remoto.
-
-## Firma conceptual del servicio
-
-Ejemplo de interfaces para la próxima implementación; **no están añadidas al
-repositorio Android**:
-
-```kotlin
-interface CampusApi {
-    @POST("auth/login")
-    suspend fun login(@Body body: LoginRequest): LoginResponse
-
-    @GET("auth/me")
-    suspend fun me(): UsuarioDto
-
-    @GET("puntos")
-    suspend fun puntos(): List<PuntoInteresDto>
-
-    @GET("misiones")
-    suspend fun misiones(): List<MisionDto>
-
-    @GET("usuarios/{id}/progreso")
-    suspend fun progreso(@Path("id") usuarioId: Int): List<ProgresoDto>
-
-    @POST("usuarios/{id}/progreso")
-    suspend fun completar(
-        @Path("id") usuarioId: Int,
-        @Body body: CompletarRequest
-    ): ProgresoDto
-}
-```
-
-Usa una base URL terminada en `/api/v1/`; el interceptor añade
-`Authorization: Bearer <accessToken>` excepto al login. `fechaHora` se mapea a
-`Long`, y los IDs/puntos se mantienen compatibles con `Int`. Consultar el
-progreso de otro estudiante devolverá 403.
-
-Al completar se envía `{misionId, codigoQr}`. El servidor calcula fecha,
-puntos y nivel. Repetir la petición devuelve el mismo evento; no sumar puntos
-por cada intento de sincronización. Una misión archivada conserva su evento
-previo, aunque ya no aparezca en el catálogo activo: el móvil debe conservar
-los detalles cacheados del historial. Si necesita reconstruir desde cero
-el detalle de misiones archivadas, definir un endpoint personal de historial
-con los detalles del catálogo; la API actual devuelve IDs y no permite a un
-estudiante solicitar `incluirArchivadas=true`.
-
-## HTTP de desarrollo y HTTPS real
-
-Agrega `android.permission.INTERNET`. Android moderno bloquea HTTP claro por
-defecto: habilítalo únicamente en la variante debug con una configuración de
-seguridad de red de desarrollo. Mantén HTTPS en release y no amplíes esa
-excepción a producción. Véase [Network Security Configuration](https://developer.android.com/privacy-and-security/security-config).
-
-No importar automáticamente hashes o sesiones locales: el backend debe
-verificar identidades y establecer sesiones remotas. Las contraseñas backend
-conservan los espacios; revisar la transición porque el login Android actual
-usa trim. También debe definirse cómo se migran puntuaciones ya acumuladas
-localmente sin aceptar totales manipulables desde el cliente.
+El APK se genera en `app/build/outputs/apk/debug/app-debug.apk`.
+La app usa exclusivamente HTTPS y el permiso INTERNET; no necesita
+`adb reverse` ni acceso directo a PostgreSQL.

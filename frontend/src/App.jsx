@@ -17,7 +17,7 @@ const pageInfo={overview:['Cada misión cuenta.','Acompaña a tus estudiantes en
 function currentPage() { const value=window.location.hash.slice(1); return Object.hasOwn(pageInfo,value) ? value : 'overview'; }
 
 export default function App() {
-  const configuredMode=import.meta.env.VITE_DATA_MODE || 'demo';
+  const configuredMode=import.meta.env.VITE_DATA_MODE || 'api';
   const client=useMemo(() => configuredMode==='api' ? createApiClient(import.meta.env.VITE_API_BASE_URL || '/api/v1') : createDemoClient(),[configuredMode]);
   const [page,setPage]=useState(currentPage); const [menuOpen,setMenuOpen]=useState(false);
   const [session,setSession]=useState(null); const [booting,setBooting]=useState(true);

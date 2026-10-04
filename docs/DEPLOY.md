@@ -23,19 +23,14 @@ catálogo y se creó un administrador. La BD gratuita vence el **1 de noviembre
 de 2026 a las 00:47 UTC**. Su acceso externo está desactivado; para tareas
 locales posteriores hay que autorizar temporalmente la IP otra vez.
 
-El proyecto Vercel `campus-quest-admin` tiene Root Directory `frontend`, Node
-24 y Fluid Compute activo; tiene asignado `campus-quest-admin.vercel.app`,
-pero aún no hay un deployment publicado. Render rechazó crear el backend
-porque no puede leer el repositorio privado. Vercel también rechazó conectar
-ese repositorio para despliegues automáticos. El propietario debe autorizar
-`Erickelrojo-22/campus-quest-admin` para ambas aplicaciones en
-[instalaciones GitHub](https://github.com/settings/installations).
-Iniciar sesión en la CLI no concede por sí solo ese acceso al código.
+El panel está publicado en https://campus-quest-admin.vercel.app y la API en
+https://campus-quest-api-prod.onrender.com. Se comprobó el healthcheck, login,
+consultas autenticadas y logout a través del proxy Vercel el 4 de octubre de
+2026. Los servicios ya pueden leer el repositorio GitHub.
 
-Las URLs de backend de los pasos siguientes siguen siendo ejemplos hasta
-crear el servicio. No repitas `create-admin` con el mismo correo: ese comando
-rechaza una cuenta existente y no cambia su contraseña. Consulta
-[la verificación actual](VALIDATION.md) antes de repetir la inicialización.
+La consulta autenticada encontró 2 administradores, 8 puntos, 8 misiones y
+0 completaciones. No repitas `create-admin` con el mismo correo: no cambia
+contraseñas existentes. Las URLs `tu-backend` de esta guía son ejemplos.
 
 ### 1. PostgreSQL y servicio Python en Render
 
@@ -168,9 +163,7 @@ un plan con continuidad. [Límites oficiales Render Free](https://render.com/doc
 El timeout de 90 segundos del proxy permite esperar el arranque habitual,
 pero no garantiza que cada reactivación termine a tiempo. Ante un error,
 consulta el healthcheck y reintenta; el dashboard no sustituye el fallo por
-datos ficticios. Las pruebas locales SQLite no acreditan un deploy remoto. La base PostgreSQL
-ya se comprobó usando la API local; falta verificar el servicio desplegado
-y el proxy Vercel en sus dominios públicos.
+datos ficticios. Las pruebas locales SQLite no acreditan un deploy remoto. La base PostgreSQL y el proxy Vercel se comprobaron en sus dominios públicos.
 
 ## Railway + Vercel: alternativa
 

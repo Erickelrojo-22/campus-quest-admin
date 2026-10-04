@@ -32,6 +32,26 @@ class Login(Schema):
     contrasena: Annotated[str, StringConstraints(min_length=1, max_length=256)]
 
 
+class Registro(Schema):
+    nombres: Nombre
+    correo: Annotated[str, StringConstraints(strip_whitespace=True, max_length=254)]
+    carrera: Nombre
+    contrasena: Annotated[str, StringConstraints(min_length=8, max_length=256)]
+
+    @field_validator("correo")
+    @classmethod
+    def correo_institucional(cls, value):
+        import re
+        value = value.lower()
+        if not re.fullmatch(r"[^@\s]+@live\.uleam\.edu\.ec", value):
+            raise ValueError("Usa tu correo institucional @live.uleam.edu.ec.")
+        return value
+
+
+class Visitante(Schema):
+    nombres: Nombre
+
+
 class SesionPublica(Schema):
     accessToken: str
     tokenType: Literal["bearer"] = "bearer"
